@@ -56,21 +56,19 @@ You will find all officially released Flux 2 Klein models on the [Black Forest L
 
 The Faceswap LoRA is required for the Faceswap mode. The BiRefNet model is optional, only needed for the Remove Background feature in PAINT mode.
 
-**Text encoder for 9b models** (place in `models/text_encoders/`)
-- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/text_encoders)
-
-**Text encoder for 4b model** (place in `models/text_encoders/`)
-- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/tree/main/split_files/text_encoders)
+**Text encoder** (place in `models/text_encoders/`)
+- [qwen_3_8b for 9b models](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/text_encoders)
+- [qwen_3_4b for 4b model](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/tree/main/split_files/text_encoders)
 
 **VAE** (place in `models/vae/`)
-- [Download](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/vae)
+- [flux2-vae](https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-9b/tree/main/split_files/vae)
 
 **Faceswap LoRA** (place in `models/loras/`)
 - [BFS Head Swap v1 (9b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1_flux-klein_9b_step3500_rank128.safetensors)
 - [BFS Head Swap v1 (4b)](https://huggingface.co/Alissonerdx/BFS-Best-Face-Swap/blob/main/bfs_head_v1_flux-klein_4b.safetensors)
 
 **Remove Background** (place in `models/background_removal/`)
-- [Download](https://huggingface.co/Comfy-Org/BiRefNet/tree/main/background_removal)
+- [birefnet](https://huggingface.co/Comfy-Org/BiRefNet/tree/main/background_removal)
 
 ---
 
@@ -78,7 +76,7 @@ The Faceswap LoRA is required for the Faceswap mode. The BiRefNet model is optio
 
 This node works with both the 4B and 9B variants of Flux 2 Klein. The 4B model is released under Apache 2.0 and can be used freely including commercially.
 
-The 9B model is released under the **FLUX Non-Commercial License** by Black Forest Labs. This means you can use it for personal and research purposes, but commercial use is not permitted. If you use the 9B model, you are responsible for complying with that license. You can review it at https://huggingface.co/black-forest-labs/FLUX.2-klein-9B.
+The 9B model is released under the **FLUX Non-Commercial License** by Black Forest Labs. This means you can use it for personal and research purposes, but commercial use is not permitted. If you use the 9B model, you are responsible for complying with that license.
 
 This node itself is fully open source with no restrictions.
 
