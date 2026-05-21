@@ -41,7 +41,7 @@ const WF = {
 
 const LS_KEY = "one_node_flux_klein_state";
 const DEFAULT_NEG_PROMPT = "low quality, deformed, blurry, watermark, ugly, bad anatomy, disfigured, mutated, extra limbs, poorly drawn face, bad proportions, gross proportions, jpeg artifacts, overexposed, underexposed";
-const DEFAULT_FACESWAP_PROMPT = "head_swap: start with Picture 1 as the base image, keeping its lighting, environment, and background. remove the head from Picture 1 completely and replace it with the head from Picture 2, strictly preserving the hair, eye color, nose structure of Picture 2. copy the direction of the eye, head rotation, micro expressions from Picture 1, high quality, sharp details, 4k. Describe the expression in Picture 1 and copy it to the new image., look straight in to the camera";
+const DEFAULT_FACESWAP_PROMPT = "Replace the head in image 1 with the head from image 2, adapting the facial features to match the artistic style, focus, and environmental lighting of the image 1.";
 
 // ── Resolution presets (Flux-friendly, divisible by 16) ──────────────────────
 const RES_PRESETS = [
