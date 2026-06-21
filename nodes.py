@@ -405,18 +405,30 @@ PromptServer.instance.routes.get("/flux_klein/workflow_remove_bg")(_serve_json("
 @PromptServer.instance.routes.get("/flux_klein/bgremoval_models")
 async def get_bgremoval_models(request):
     """Scan models/background_removal/ for all model files."""
-    try:
-        models_dir = folder_paths.models_dir
-    except Exception:
-        models_dir = os.path.join(os.path.dirname(os.path.dirname(NODE_DIR)), "models")
-    bg_dir = os.path.join(models_dir, "background_removal")
-    found = []
     exts = [".safetensors", ".onnx", ".pt", ".pth"]
-    if os.path.isdir(bg_dir):
-        for fn in os.listdir(bg_dir):
-            if any(fn.lower().endswith(e) for e in exts):
-                found.append(fn)
-    found = sorted(found)
+    found = []
+    # Try via folder_paths first (same mechanism as other model scans)
+    try:
+        bases = folder_paths.get_folder_paths("background_removal")
+        for base in bases:
+            if os.path.isdir(base):
+                for fn in os.listdir(base):
+                    if any(fn.lower().endswith(e) for e in exts):
+                        found.append(fn)
+    except Exception:
+        pass
+    # Fallback: scan models/background_removal/ relative to ComfyUI root
+    if not found:
+        try:
+            models_dir = folder_paths.models_dir
+        except Exception:
+            models_dir = os.path.join(os.path.dirname(os.path.dirname(NODE_DIR)), "models")
+        bg_dir = os.path.join(models_dir, "background_removal")
+        if os.path.isdir(bg_dir):
+            for fn in os.listdir(bg_dir):
+                if any(fn.lower().endswith(e) for e in exts):
+                    found.append(fn)
+    found = sorted(set(found))
     return web.json_response({"models": found})
 
 
