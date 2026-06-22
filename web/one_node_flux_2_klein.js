@@ -407,6 +407,7 @@ function ImgSlot(optional, onFile, onDims){
     hasFile(){return !!_currentName;},
     _restorePreview,
     _restorePreviewUrl,
+    loadFile:_load,
   };
 }
 
@@ -1960,8 +1961,33 @@ app.registerExtension({
       const _skSzLabel=mk("div",{fontSize:"8px",fontWeight:"700",color:LIME,letterSpacing:".07em",
         textTransform:"uppercase",flexShrink:"0"});
       tx(_skSzLabel,"Canvas");
-      const _sketchWInp=NI("W",1024,64,4096,8,()=>{},"66px");
-      const _sketchHInp=NI("H",1024,64,4096,8,()=>{},"66px");
+      let _skArLocked=false;
+      let _skArRatio=null;
+      const _skArLockBtn=mk("button",{
+        width:"20px",height:"20px",borderRadius:"4px",flexShrink:"0",
+        background:"transparent",border:`1px solid ${C.border}`,
+        color:C.muted,cursor:"pointer",outline:"none",padding:"0",
+        display:"flex",alignItems:"center",justifyContent:"center",
+        transition:"border-color .15s,color .15s,background .15s",
+      });
+      const _skLockIconOpen=`<svg viewBox="0 0 12 14" width="10" height="11" fill="currentColor"><rect x="1" y="6" width="10" height="8" rx="1.5"/><path d="M3.5 6V4a2.5 2.5 0 015 0" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
+      const _skLockIconClosed=`<svg viewBox="0 0 12 14" width="10" height="11" fill="currentColor"><rect x="1" y="6" width="10" height="8" rx="1.5"/><path d="M3.5 6V4a2.5 2.5 0 015 0v2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>`;
+      _skArLockBtn.innerHTML=_skLockIconOpen;
+      _skArLockBtn.title="Lock aspect ratio";
+      _skArLockBtn.onclick=()=>{
+        _skArLocked=!_skArLocked;
+        if(_skArLocked) _skArRatio=(_sketchWInp.numVal||1024)/(_sketchHInp.numVal||1024);
+        _skArLockBtn.style.borderColor=_skArLocked?LIME:C.border;
+        _skArLockBtn.style.color=_skArLocked?LIME:C.muted;
+        _skArLockBtn.style.background=_skArLocked?"rgba(240,255,65,.08)":"transparent";
+        _skArLockBtn.innerHTML=_skArLocked?_skLockIconClosed:_skLockIconOpen;
+      };
+      const _sketchWInp=NI("W",1024,64,4096,8,(v)=>{
+        if(_skArLocked&&_skArRatio) _sketchHInp.setVal(Math.max(64,Math.round(v/_skArRatio)));
+      },"66px");
+      const _sketchHInp=NI("H",1024,64,4096,8,(v)=>{
+        if(_skArLocked&&_skArRatio) _sketchWInp.setVal(Math.max(64,Math.round(v*_skArRatio)));
+      },"66px");
       _sketchWInp._inp.addEventListener("keydown",e=>{ if(e.key==="Tab"&&!e.shiftKey){ e.preventDefault(); _sketchHInp._inp.focus(); _sketchHInp._inp.select(); } });
       _sketchHInp._inp.addEventListener("keydown",e=>{ if(e.key==="Tab"&&e.shiftKey){ e.preventDefault(); _sketchWInp._inp.focus(); _sketchWInp._inp.select(); } });
       const _sketchXLbl=mk("button",{
@@ -2008,13 +2034,13 @@ app.registerExtension({
         if(_sketchSizeApplied){ _sketchResApplyBtn.style.background="rgba(255,255,255,.08)";_sketchResApplyBtn.style.color="rgba(255,255,255,.6)"; }
         else _sketchResApplyBtn.style.background="rgba(240,255,65,.15)";
       };
-      _sketchSizeGroup.append(_skSzLabel,_sketchWInp,_sketchXLbl,_sketchHInp,_sketchResApplyBtn);
+      _sketchSizeGroup.append(_skSzLabel,_sketchWInp,_sketchXLbl,_sketchHInp,_skArLockBtn,_sketchResApplyBtn);
 
       // _sketchColorSwatch placeholder — real swatch built in left toolbar below
       const _sketchColorSwatch=mk("div",{display:"none"});
       // _sketchSizeSlider/_sketchSizeNumInp — referenced by toolbar for sync
-      const _sketchSizeSlider=mk("input",{display:"none"},{type:"range",min:"1",max:"80",value:"8"});
-      const _sketchSizeNumInp=mk("input",{display:"none"},{type:"number",min:"1",max:"80",value:"8"});
+      const _sketchSizeSlider=mk("input",{display:"none"},{type:"range",min:"1",max:"500",value:"8"});
+      const _sketchSizeNumInp=mk("input",{display:"none"},{type:"number",min:"1",max:"500",value:"8"});
 
       // ── Zoom ─────────────────────────────────────────────────────────────
       const _mkZBtn=(t,icon)=>{
@@ -2065,6 +2091,7 @@ app.registerExtension({
       _sketchCloseBtn.onmouseenter=()=>_sketchCloseBtn.style.color="#fff";
       _sketchCloseBtn.onmouseleave=()=>_sketchCloseBtn.style.color=C.muted;
       const _closeSketch=()=>{
+        if(_sketchFullscreen) _sketchFsExit();
         _sketchOv.style.opacity="0";
         setTimeout(()=>{
           _sketchOv.style.display="none";
@@ -2082,7 +2109,54 @@ app.registerExtension({
       });
       _sketchTopCenter.append(_sketchSizeGroup,_skBtnSep(),_sketchZoomOut,_sketchZoomReset,_sketchZoomIn,_skBtnSep(),_sketchUndoBtn,_sketchClearBtn);
       const _sketchTopRight=mk("div",{display:"flex",alignItems:"center",gap:"8px",marginLeft:"auto"});
-      _sketchTopRight.append(_sketchSaveBtn,_sketchCloseBtn);
+
+      // Fullscreen toggle for sketch
+      let _sketchFullscreen=false;
+      const _sketchFsBtn=mk("button",{background:"none",border:"none",cursor:"pointer",
+        color:C.muted,padding:"2px 4px",outline:"none",display:"flex",alignItems:"center",
+        borderRadius:"4px",transition:"color .15s",flexShrink:"0"});
+      _sketchFsBtn.innerHTML=`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>`;
+      _sketchFsBtn.title="Toggle fullscreen sketch";
+      _sketchFsBtn.onmouseenter=()=>_sketchFsBtn.style.color="#fff";
+      _sketchFsBtn.onmouseleave=()=>_sketchFsBtn.style.color=C.muted;
+      let _sketchFsOrigParent=null;
+      let _sketchFsOrigZoom=1,_sketchFsOrigPanX=0,_sketchFsOrigPanY=0;
+      const _sketchFsExit=()=>{
+        _sketchFullscreen=false;
+        if(_sketchFsOrigParent) _sketchFsOrigParent.appendChild(_sketchOv);
+        _sketchOv.style.position="absolute";
+        _sketchOv.style.inset="0";
+        _sketchOv.style.zIndex="270";
+        _sketchToolbar.style.zoom="";
+        _sketchLayersPanel.style.zoom="";
+        _sketchTopBar.style.zoom="";
+        _sketchShortcutBar.style.zoom="";
+        _sketchCloseBtn.style.display="";
+        requestAnimationFrame(()=>_sketchDoFit());
+      };
+      _sketchFsBtn.onclick=()=>{
+        _sketchFullscreen=!_sketchFullscreen;
+        if(_sketchFullscreen){
+          _sketchFsOrigZoom=_sketchZoom;
+          _sketchFsOrigPanX=_sketchPanX;
+          _sketchFsOrigPanY=_sketchPanY;
+          _sketchFsOrigParent=_sketchOv.parentElement;
+          document.body.appendChild(_sketchOv);
+          _sketchOv.style.position="fixed";
+          _sketchOv.style.inset="0";
+          _sketchOv.style.zIndex="99999";
+          _sketchToolbar.style.zoom="2";
+          _sketchLayersPanel.style.zoom="2";
+          _sketchTopBar.style.zoom="2";
+          _sketchShortcutBar.style.zoom="2";
+          _sketchCloseBtn.style.display="none";
+          requestAnimationFrame(()=>_sketchDoFit());
+        } else {
+          _sketchFsExit();
+        }
+      };
+
+      _sketchTopRight.append(_sketchSaveBtn,_sketchFsBtn,_sketchCloseBtn);
       _sketchTopBar.append(_sketchTopCenter,_sketchTopRight);
 
       // ── Tool buttons ──────────────────────────────────────────────────────
@@ -2134,9 +2208,9 @@ app.registerExtension({
         return row;
       };
 
-      const _skSizeRow=_mkSliderRow("Size",1,200,8,(v)=>{
+      const _skSizeRow=_mkSliderRow("Size",1,500,8,(v)=>{
         _sketchSize=v;
-        _sketchSizeSlider.value=String(Math.min(v,200));_sketchSizeNumInp.value=String(v);
+        _sketchSizeSlider.value=String(Math.min(v,500));_sketchSizeNumInp.value=String(v);
       });
       // Allow typing beyond slider max — number input has no hard cap
       _skSizeRow.querySelector("input[type=number]").removeAttribute("max");
@@ -2153,9 +2227,9 @@ app.registerExtension({
       const _sketchSetSize=(v)=>{
         v=Math.max(1,Math.min(2000,parseInt(v)||1));
         _sketchSize=v;
-        _sketchSizeSlider.value=String(Math.min(v,200));
+        _sketchSizeSlider.value=String(Math.min(v,500));
         _sketchSizeNumInp.value=String(v);
-        _skSizeRow._set(Math.min(v,200));
+        _skSizeRow._set(Math.min(v,500));
       };
       _sketchSizeSlider.oninput=()=>_sketchSetSize(_sketchSizeSlider.value);
       _sketchSizeNumInp.oninput=()=>_sketchSetSize(_sketchSizeNumInp.value);
@@ -3072,7 +3146,7 @@ app.registerExtension({
       };
       _mkZoomBtnHandler(_sketchZoomIn,1.25);
       _mkZoomBtnHandler(_sketchZoomOut,1/1.25);
-      _sketchZoomReset.onclick=()=>{
+      const _sketchDoFit=()=>{
         const vw=_sketchViewport.offsetWidth,vh=_sketchViewport.offsetHeight;
         const scale=Math.min(1,(vw-40)/_sketchCanvasW,(vh-40)/_sketchCanvasH);
         _sketchZoom=scale;
@@ -3080,6 +3154,7 @@ app.registerExtension({
         _sketchPanY=Math.round((vh-_sketchCanvasH*scale)/2);
         _sketchApplyTransform();
       };
+      _sketchZoomReset.onclick=_sketchDoFit;
 
       // Panning state
       let _sketchPanning=false,_sketchPanStartX=0,_sketchPanStartY=0,_sketchPanOX=0,_sketchPanOY=0;
@@ -3238,7 +3313,7 @@ app.registerExtension({
         if(_sketchTool!=="move") { _sketchCursorEl.innerHTML=""; _sketchCursorEl.style.display="block"; }
         const brushTools=["brush","eraser"];
         if(brushTools.includes(_sketchTool)){
-          const sz=Math.max(2,_sketchSize*_sketchZoom);
+          const sz=Math.max(2,(_sketchSize/2)*_sketchZoom);
           _sketchCursorEl.style.width=sz+"px";_sketchCursorEl.style.height=sz+"px";
           _sketchCursorEl.style.borderRadius="50%";
           _sketchCursorEl.style.background=_sketchTool==="eraser"?"rgba(255,255,255,.2)":"transparent";
@@ -3936,10 +4011,10 @@ app.registerExtension({
           return;
         }
         const tag=(e.target||{}).tagName||"";
-        if(tag==="INPUT"||tag==="TEXTAREA") return;
         if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){
           e.preventDefault();e.stopPropagation();_sketchDoUndo();return;
         }
+        if(tag==="INPUT"||tag==="TEXTAREA") return;
         if(e.ctrlKey||e.metaKey||e.altKey) return;
         switch(e.key){
           case"b":case"B":e.preventDefault();e.stopPropagation();_sketchSetTool("brush");break;
@@ -7903,6 +7978,54 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         transform:"translateY(6px)",
       });
 
+      // ── Gallery thumbnail right-click context menu ────────────────────────
+      let _galCtxImg=null;
+      const _galCtxMenu=mk("div",{
+        position:"fixed",zIndex:"999999",background:C.bg1,
+        border:`1px solid ${C.borderH}`,borderRadius:"8px",
+        minWidth:"170px",display:"none",flexDirection:"column",
+        boxShadow:"0 4px 20px rgba(0,0,0,.7)",overflow:"hidden",
+      });
+      const _mkGalCtxItem=(label,icon,onClick)=>{
+        const row=mk("div",{
+          padding:"7px 12px",fontSize:"10px",fontWeight:"500",color:C.text,
+          cursor:"pointer",display:"flex",alignItems:"center",gap:"7px",
+          transition:"background .1s,color .1s",userSelect:"none",
+        });
+        const ico=mk("span",{fontSize:"11px",width:"14px",textAlign:"center",flexShrink:"0",color:C.muted});
+        tx(ico,icon);
+        const lbl=mk("span",{}); tx(lbl,label);
+        row.append(ico,lbl);
+        row.onmouseenter=()=>{row.style.background="rgba(240,255,65,.10)";row.style.color=LIME;ico.style.color=LIME;};
+        row.onmouseleave=()=>{row.style.background="";row.style.color=C.text;ico.style.color=C.muted;};
+        row.onclick=()=>{ _galCtxMenu.style.display="none"; onClick(); };
+        return row;
+      };
+      const _mkGalCtxSec=(label)=>{
+        const h=mk("div",{padding:"6px 12px 3px",fontSize:"8px",fontWeight:"700",
+          letterSpacing:".08em",textTransform:"uppercase",color:C.muted,userSelect:"none"});
+        tx(h,label);return h;
+      };
+      const _mkGalCtxDiv=()=>mk("div",{height:"1px",background:C.border,margin:"2px 0"});
+      _galCtxMenu.append(
+        _mkGalCtxSec("I2I"),
+        _mkGalCtxItem("I2I slot","⟳",()=>{ if(_galCtxImg)_loadIntoI2ISlot(_galCtxImg); }),
+        _mkGalCtxDiv(),
+        _mkGalCtxSec("Edit"),
+        _mkGalCtxItem("Image 1","①",()=>{ if(_galCtxImg)_loadIntoSlot(_galCtxImg,1); }),
+        _mkGalCtxItem("Image 2","②",()=>{ if(_galCtxImg)_loadIntoSlot(_galCtxImg,2); }),
+        _mkGalCtxDiv(),
+        _mkGalCtxSec("Paint"),
+        _mkGalCtxItem("Paint slot","✏",()=>{ if(_galCtxImg)_loadIntoPaintSlot(_galCtxImg); }),
+        _mkGalCtxDiv(),
+        _mkGalCtxSec("Faceswap"),
+        _mkGalCtxItem("Target","◎",()=>{ if(_galCtxImg)_loadIntoFsSlot(_galCtxImg,"target"); }),
+        _mkGalCtxItem("Source","◈",()=>{ if(_galCtxImg)_loadIntoFsSlot(_galCtxImg,"source"); }),
+      );
+      document.body.appendChild(_galCtxMenu);
+      document.addEventListener("click",()=>{ _galCtxMenu.style.display="none"; });
+      document.addEventListener("keydown",(e)=>{ if(e.key==="Escape") _galCtxMenu.style.display="none"; });
+
       // Gallery header
       const galHdr=mk("div",{display:"flex",alignItems:"center",justifyContent:"space-between",
         marginBottom:"12px",flexShrink:"0",gap:"8px"});
@@ -8722,6 +8845,13 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           cell.onmouseleave=()=>{ cell.style.borderColor=C.border;ov.style.opacity="0"; };
 
           cell.onclick=()=>{ _lbNavList=images; lbShow(v,idx); };
+          cell.addEventListener("contextmenu",(e)=>{
+            e.preventDefault();
+            _galCtxImg=v;
+            _galCtxMenu.style.display="flex";
+            _galCtxMenu.style.left=e.clientX+"px";
+            _galCtxMenu.style.top=e.clientY+"px";
+          });
 
           if(v.favorite===true){
             favIco.style.opacity="1";
@@ -8992,6 +9122,31 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         if(settingsOverlay.style.display!=="none"){ e.preventDefault();e.stopPropagation();closeOverlayFade(settingsOverlay);return; }
         if(helpOverlay.style.display!=="none"){ e.preventDefault();e.stopPropagation();closeOverlayFade(helpOverlay);return; }
       });
+
+      // ── Paste image from clipboard (Ctrl+V) ──────────────────────────────────
+      document.addEventListener("paste",async(e)=>{
+        if(!_mouseOverRoot) return;
+        const tag=(document.activeElement||{}).tagName||"";
+        if(tag==="INPUT"||tag==="TEXTAREA") return;
+        const items=[...(e.clipboardData?.items||[])];
+        const imgItem=items.find(i=>i.type.startsWith("image/"));
+        if(!imgItem) return;
+        e.preventDefault();e.stopPropagation();
+        const file=imgItem.getAsFile();
+        if(!file) return;
+        // Pick target slot based on active pill and slot state
+        let targetSlot=null;
+        if(activePill==="edit"){
+          targetSlot=!img1Slot.hasFile()?img1Slot:img2Slot;
+        } else if(activePill==="i2i"){
+          targetSlot=i2iSlot;
+        } else if(activePill==="inpaint"){
+          targetSlot=_paintSlot;
+        } else if(activePill==="faceswap"){
+          targetSlot=!_fsTargetSlot.hasFile()?_fsTargetSlot:_fsSourceSlot;
+        }
+        if(targetSlot) targetSlot.loadFile(file);
+      },{capture:true});
 
       // Fetch models
       const _loadModels=()=>api.fetchApi("/flux_klein/models")

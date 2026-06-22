@@ -109,6 +109,21 @@ Built with the help of [Claude](https://claude.ai) by Anthropic.
 
 ## Changelog
 
+### June 22, 2026
+
+**Paste from clipboard**
+You can now paste images directly from your clipboard (Ctrl+V) while hovering over the node. In Edit and Faceswap mode the image goes into the first empty slot, then the second if the first is already taken.
+
+**Sketch improvements**
+- Added fullscreen mode - hit the expand button in the Sketch toolbar to go fullscreen.
+- Brush size limit increased from 200 to 500px.
+- Added aspect ratio lock button next to the canvas size inputs.
+
+**Gallery right-click**
+Right-clicking any thumbnail in the gallery grid now shows a quick "Use as..." context menu.
+
+---
+
 ### June 20, 2026
 
 **Negative LoRA strength**
