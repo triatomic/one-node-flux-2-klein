@@ -210,6 +210,10 @@ function Pill(txt,active,onClick){
   return b;
 }
 
+// Parse a float that may use a comma as the decimal separator (common on EU
+// locales, where parseFloat("0,5") returns 0). Returns NaN for empty/invalid.
+function _pf(v){ return parseFloat(String(v).replace(",",".")); }
+
 // ── Number input ──────────────────────────────────────────────────────────────
 function NI(_label,val,min,max,_step,onChange,width="72px"){
   const wrap=mk("div",{
@@ -221,15 +225,15 @@ function NI(_label,val,min,max,_step,onChange,width="72px"){
     flex:"1 1 0",minWidth:"0",background:"transparent",border:"none",outline:"none",
     color:C.text,fontSize:"11px",padding:"0",textAlign:"left",
   },{type:"number",min:String(min),max:String(max),value:String(val)});
-  inp.oninput=()=>{ const v=Math.max(min,Math.min(max,parseFloat(inp.value)||min)); onChange(v); };
+  inp.oninput=()=>{ const v=Math.max(min,Math.min(max,_pf(inp.value)||min)); onChange(v); };
   inp.onfocus=()=>{ inp.select(); wrap.style.borderColor=LIME; };
-  inp.onblur=()=>{ inp.value=String(Math.max(min,Math.min(max,parseFloat(inp.value)||min))); wrap.style.borderColor=C.border; };
+  inp.onblur=()=>{ inp.value=String(Math.max(min,Math.min(max,_pf(inp.value)||min))); wrap.style.borderColor=C.border; };
   inp.addEventListener("keydown",e=>{
     if(e.key==="Enter"){ inp.blur(); return; }
     if(e.key==="ArrowUp"||e.key==="ArrowDown"){
       e.preventDefault();
       const step=wrap._arrowStep||8;
-      const cur=Math.max(min,Math.min(max,parseFloat(inp.value)||min));
+      const cur=Math.max(min,Math.min(max,_pf(inp.value)||min));
       const next=e.key==="ArrowUp"
         ? Math.min(max, Math.round((cur+step)/step)*step)
         : Math.max(min, Math.round((cur-step)/step)*step);
@@ -241,7 +245,7 @@ function NI(_label,val,min,max,_step,onChange,width="72px"){
   wrap.onclick=()=>inp.focus();
   wrap._inp=inp;
   wrap.setVal=(v)=>{inp.value=String(v);};
-  Object.defineProperty(wrap,"numVal",{get(){return parseFloat(inp.value)||min;}});
+  Object.defineProperty(wrap,"numVal",{get(){return _pf(inp.value)||min;}});
   return wrap;
 }
 
@@ -572,6 +576,10 @@ app.registerExtension({
           _preRunFiles: new Set(),
           soundEnabled: saved.soundEnabled!==undefined?saved.soundEnabled:true,
           extLoaders:   saved.extLoaders||false,
+          // Downscale reference images (EDIT + I2I input slots) before VAE encode.
+          // Default ON at 1 MP = the existing behaviour, so existing users see no change.
+          downscaleRef:   saved.downscaleRef!==undefined?saved.downscaleRef:true,
+          downscaleRefMP: saved.downscaleRefMP!==undefined?saved.downscaleRefMP:1.0,
           previewUrl:   null,
         };
       }
@@ -601,6 +609,7 @@ app.registerExtension({
           promptPaint:S.promptPaint, promptFs:S.promptFs, promptI2i:S.promptI2i,
           i2iImage:S.i2iImage, i2iDenoise:S.i2iDenoise, i2iResizeLonger:S.i2iResizeLonger,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
+          downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
         });
       };
 
@@ -969,7 +978,51 @@ app.registerExtension({
         _refreshExtInputUI();
       });
 
-      settingsOverlay.append(settHdr,modGrid,_kvNote,_baseNote,modGrid2,prefTitle,soundToggle.el,advUIToggle.el,extLoadersToggle.el);
+      // ── Downscale reference images (EDIT + I2I) ──────────────────────────────
+      const _dsRow=mk("div",{display:"flex",flexDirection:"column",gap:"5px",padding:"9px 0",borderBottom:`1px solid ${C.border}`});
+      const _dsTop=mk("div",{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px"});
+      const _dsLblWrap=mk("div",{display:"flex",alignItems:"center",gap:"8px",flex:"1",minWidth:"0"});
+      const _dsLbl=mk("span",{fontSize:"12px",color:C.text});tx(_dsLbl,"Downscale reference images to");
+      // MP number input — only enabled when the toggle is ON
+      const _dsMP=mk("input",{
+        width:"52px",textAlign:"center",background:"rgba(255,255,255,.05)",
+        border:`1px solid rgba(255,255,255,.12)`,borderRadius:"6px",
+        color:LIME,fontSize:"11px",fontWeight:"700",padding:"4px 0",outline:"none",
+        transition:"border-color .15s,opacity .15s",flexShrink:"0",
+      },{type:"number",step:"0.1",min:"0.1",max:"16",value:String(S.downscaleRefMP)});
+      const _dsMPUnit=mk("span",{fontSize:"11px",color:C.muted,flexShrink:"0"});tx(_dsMPUnit,"MP");
+      _dsLblWrap.append(_dsLbl,_dsMP,_dsMPUnit);
+      // Toggle track (reuse the same visual style as Toggle())
+      const _dsTrack=mk("div",{width:"34px",height:"18px",borderRadius:"9px",
+        background:S.downscaleRef?LIME:C.dim,cursor:"pointer",position:"relative",transition:"background .2s",flexShrink:"0"});
+      const _dsThumb=mk("div",{position:"absolute",top:"2px",left:S.downscaleRef?"16px":"2px",
+        width:"14px",height:"14px",borderRadius:"50%",background:S.downscaleRef?"#111":"#888",transition:"left .2s,background .2s"});
+      _dsTrack.appendChild(_dsThumb);
+      const _dsHint=mk("div",{fontSize:"9px",color:C.muted,lineHeight:"1.5"});
+      _dsHint.innerHTML="Shrinks the input image before it enters the model - in <b>EDIT</b>, <b>I2I</b> and <b>Sketch</b> modes. Lower MP = faster generation and lower VRAM, but finer details may be lost and the result can shift slightly, since the image gets resized to fit the model. Recommended if you have limited VRAM or hit out-of-memory errors on large images. Turn it <b>off</b> for maximum fidelity when your GPU can handle the full resolution.";
+      const _dsApplyEnabled=()=>{
+        const on=S.downscaleRef;
+        _dsMP.disabled=!on;
+        _dsMP.style.opacity=on?"1":"0.4";
+        _dsLbl.style.opacity=on?"1":"0.6";
+      };
+      _dsTrack.onclick=()=>{
+        S.downscaleRef=!S.downscaleRef;
+        _dsTrack.style.background=S.downscaleRef?LIME:C.dim;
+        _dsThumb.style.left=S.downscaleRef?"16px":"2px";
+        _dsThumb.style.background=S.downscaleRef?"#111":"#888";
+        _dsApplyEnabled();persist();
+      };
+      _dsMP.onfocus=()=>_dsMP.style.borderColor=LIME;
+      _dsMP.onblur=()=>{
+        let v=_pf(_dsMP.value); if(isNaN(v)||v<=0) v=1.0; v=Math.min(16,Math.max(0.1,v));
+        S.downscaleRefMP=v; _dsMP.value=String(v); _dsMP.style.borderColor="rgba(255,255,255,.12)"; persist();
+      };
+      _dsTop.append(_dsLblWrap,_dsTrack);
+      _dsRow.append(_dsTop,_dsHint);
+      _dsApplyEnabled();
+
+      settingsOverlay.append(settHdr,modGrid,_kvNote,_baseNote,modGrid2,prefTitle,soundToggle.el,advUIToggle.el,extLoadersToggle.el,_dsRow);
 
       // ── Overlay helpers ───────────────────────────────────────────────────
       const openOverlay=(el)=>{
@@ -2255,6 +2308,8 @@ app.registerExtension({
         _skFgSwatch.style.background=_sketchColor;
         _sketchColorSwatch.style.background=_sketchColor;
       };
+      // Release focus after picking so keyboard shortcuts keep working
+      _sketchColorNative.onchange=()=>{ _sketchColorNative.blur(); };
 
       // ── Stroke/Fill toggle ────────────────────────────────────────────────
       const _mkSFBtnInline=(lbl)=>{
@@ -4014,7 +4069,11 @@ app.registerExtension({
         if((e.ctrlKey||e.metaKey)&&(e.key==="z"||e.key==="Z")){
           e.preventDefault();e.stopPropagation();_sketchDoUndo();return;
         }
-        if(tag==="INPUT"||tag==="TEXTAREA") return;
+        // Block shortcuts only when typing in a text field. Color picker and
+        // range sliders keep focus after use but don't need keyboard — let
+        // shortcuts (b/e/r/c/v…) keep working after picking a color.
+        const _it=(e.target||{}).type||"";
+        if((tag==="INPUT"&&_it!=="color"&&_it!=="range")||tag==="TEXTAREA") return;
         if(e.ctrlKey||e.metaKey||e.altKey) return;
         switch(e.key){
           case"b":case"B":e.preventDefault();e.stopPropagation();_sketchSetTool("brush");break;
@@ -6176,18 +6235,21 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       const promptCap=cap("Prompt");
 
       // ── LoRA overlay ──────────────────────────────────────────────────────
+      // Overlay covers the node widget (like the prompt/sketch overlays), not the whole screen.
       const _ulOverlay=mk("div",{
-        position:"fixed",inset:"0",zIndex:"99998",display:"none",
+        position:"absolute",inset:"0",zIndex:"250",display:"none",
         alignItems:"center",justifyContent:"center",
+        padding:"14px",boxSizing:"border-box",
       });
-      const _ulBg=mk("div",{position:"absolute",inset:"0",background:"rgba(0,0,0,.7)"});
+      const _ulBg=mk("div",{position:"absolute",inset:"0",background:"rgba(0,0,0,.6)"});
       const _ulPanel=mk("div",{
         position:"relative",
         background:"linear-gradient(145deg,#111 0%,#0d0d0d 100%)",
         border:`1px solid rgba(240,255,65,.18)`,
-        borderRadius:"16px",padding:"20px 22px 22px",width:"520px",
+        borderRadius:"16px",padding:"18px 20px 20px",width:"100%",maxWidth:"560px",
+        maxHeight:"100%",
         boxShadow:"0 20px 60px rgba(0,0,0,.95),inset 0 1px 0 rgba(255,255,255,.04)",
-        display:"flex",flexDirection:"column",gap:"16px",
+        display:"flex",flexDirection:"column",gap:"14px",boxSizing:"border-box",
       });
       const _ulPHdr=mk("div",{display:"flex",alignItems:"center",gap:"8px"});
       const _ulPTitle=mk("div",{fontSize:"12px",fontWeight:"700",color:"#fff",flex:"1",
@@ -6198,8 +6260,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       tx(_ulPClose,"×");
       _ulPClose.onmouseenter=()=>_ulPClose.style.color="#fff";
       _ulPClose.onmouseleave=()=>_ulPClose.style.color=C.muted;
-      _ulPClose.onclick=()=>{ _ulOverlay.style.display="none"; hideDimmer(); };
-      _ulBg.onclick=()=>{ _ulOverlay.style.display="none"; hideDimmer(); };
+      const _ulCloseFn=()=>{ _ulOverlay.style.display="none"; };
+      _ulPClose.onclick=_ulCloseFn;
+      _ulBg.onclick=_ulCloseFn;
       const _ulRefreshBtn=mk("button",{background:"none",border:"none",cursor:"pointer",
         color:C.muted,fontSize:"13px",lineHeight:"1",padding:"0 6px 0 0",outline:"none",flexShrink:"0"});
       tx(_ulRefreshBtn,"↻");
@@ -6209,35 +6272,52 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       _ulRefreshBtn.onclick=()=>{ tx(_ulRefreshBtn,"↻"); _loadModels(); };
       _ulPHdr.append(_ulPTitle,_ulRefreshBtn,_ulPClose);
       const _ulPSub=mk("div",{width:"100%",height:"1px",background:"rgba(240,255,65,.10)",marginTop:"-6px"});
-      const _ulRows=mk("div",{display:"flex",flexDirection:"column",gap:"10px"});
+      const _ulRows=mk("div",{display:"flex",flexDirection:"column",gap:"10px",
+        overflowY:"auto",overflowX:"hidden",flex:"1 1 auto",minHeight:"0",paddingRight:"4px"});
+
+      const _UL_DEFAULT=3;   // default number of LoRA slots
+      const _UL_MAX=6;       // maximum slots the user can add
 
       const _mkULRow=(idx)=>{
-        const row=mk("div",{display:"flex",flexDirection:"column",gap:"4px"});
-        const rowLbl=mk("div",{fontSize:"7px",color:"rgba(240,255,65,.5)",fontWeight:"700",
-          letterSpacing:".1em",textTransform:"uppercase"});
-        tx(rowLbl,`SLOT ${idx+1}`);
-        const rowCtrl=mk("div",{display:"flex",alignItems:"center",gap:"6px"});
-
-        // Trigger words area — shown below the control row
-        const trigRow=mk("div",{display:"none",flexDirection:"column",gap:"5px",
-          marginTop:"2px",padding:"8px 10px",background:"rgba(240,255,65,.04)",
-          border:`1px solid rgba(240,255,65,.12)`,borderRadius:"8px",
+        const row=mk("div",{display:"flex",flexDirection:"column",gap:"6px",
+          paddingBottom:"12px",borderBottom:`1px solid rgba(255,255,255,.06)`});
+        const rowCtrl=mk("div",{display:"flex",alignItems:"center",gap:"7px"});
+        // Slot number badge — sits in front of the dropdown
+        const _rowNum=mk("span",{
+          display:"inline-flex",alignItems:"center",justifyContent:"center",
+          width:"17px",height:"17px",borderRadius:"50%",fontSize:"8px",fontWeight:"700",
+          background:"rgba(240,255,65,.1)",color:LIME,flexShrink:"0",
         });
-        const trigTopRow=mk("div",{display:"flex",alignItems:"center",gap:"6px"});
-        const trigLbl=mk("div",{fontSize:"9px",fontWeight:"600",color:C.muted,whiteSpace:"nowrap",flexShrink:"0"});
-        tx(trigLbl,"Trigger words:");
+        tx(_rowNum,String(idx+1));
+
+        // Trigger words area — shown below the control row (subtle, not a heavy block)
+        const trigRow=mk("div",{display:"none",flexDirection:"column",gap:"6px",
+          marginTop:"1px",paddingLeft:"24px",
+        });
+        const trigTopRow=mk("div",{display:"flex",alignItems:"baseline",gap:"6px"});
+        const trigLbl=mk("div",{fontSize:"8px",fontWeight:"700",color:C.muted,whiteSpace:"nowrap",
+          flexShrink:"0",letterSpacing:".06em",textTransform:"uppercase",opacity:".8"});
+        tx(trigLbl,"Trigger");
         const trigVal=mk("div",{fontSize:"10px",color:LIME,flex:"1",minWidth:"0",
           wordBreak:"break-word",lineHeight:"1.4"});
         tx(trigVal,"—");
-        trigTopRow.append(trigLbl,trigVal);
+        // Edit pencil — shown only when a trigger value exists, toggles the input row
+        const trigEditBtn=mk("button",{
+          background:"none",border:"none",cursor:"pointer",color:C.muted,
+          padding:"0 2px",lineHeight:"1",flexShrink:"0",outline:"none",
+          transition:"color .15s",display:"none",fontSize:"10px",
+        });
+        trigEditBtn.innerHTML=`<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`;
+        trigEditBtn.title="Edit trigger words";
+        trigEditBtn.onmouseenter=()=>trigEditBtn.style.color=LIME;
+        trigEditBtn.onmouseleave=()=>trigEditBtn.style.color=C.muted;
+        trigTopRow.append(trigLbl,trigVal,trigEditBtn);
 
         // Custom trigger input row
-        const trigCustomRow=mk("div",{display:"flex",alignItems:"center",gap:"5px",marginTop:"2px"});
-        const trigCustomLbl=mk("div",{fontSize:"8px",color:C.muted,whiteSpace:"nowrap",flexShrink:"0"});
-        tx(trigCustomLbl,"Custom:");
+        const trigCustomRow=mk("div",{display:"flex",alignItems:"center",gap:"5px"});
         const trigCustomInp=mk("input",{
-          flex:"1",background:"rgba(255,255,255,.06)",border:`1px solid rgba(255,255,255,.12)`,
-          borderRadius:"5px",color:C.text,fontSize:"10px",padding:"3px 7px",
+          flex:"1",background:"rgba(255,255,255,.04)",border:`1px solid rgba(255,255,255,.1)`,
+          borderRadius:"6px",color:C.text,fontSize:"10px",padding:"5px 9px",
           outline:"none",transition:"border-color .15s",
         },{type:"text",placeholder:"Add custom trigger words…"});
         trigCustomInp.onfocus=()=>trigCustomInp.style.borderColor=LIME;
@@ -6255,14 +6335,24 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           if(!name||name==="none") return;
           const txt=trigCustomInp.value.trim();
           await _saveCustomTrigger(name,txt);
-          // Update displayed value and clear input field
+          // Update displayed value and collapse the input row
           tx(trigVal,txt||"—");
           trigCustomInp.value="";
           trigSaveBtn.style.color=LIME; tx(trigSaveBtn,"Saved ✓");
           setTimeout(()=>{ trigSaveBtn.style.color=C.muted; tx(trigSaveBtn,"Save"); },1500);
+          _setTrigEditMode(false);
         };
-        trigCustomRow.append(trigCustomLbl,trigCustomInp,trigSaveBtn);
+        trigCustomRow.append(trigCustomInp,trigSaveBtn);
         trigRow.append(trigTopRow,trigCustomRow);
+
+        // The input row is never shown automatically — only after clicking the pencil.
+        // The trigger value (or "—") is always visible under the dropdown, so the user
+        // already sees whether one is set; the pencil just opens the editor.
+        const _setTrigEditMode=(editing)=>{
+          trigCustomRow.style.display=editing?"flex":"none";
+          trigEditBtn.style.display=editing?"none":"inline-flex";
+        };
+        trigEditBtn.onclick=()=>{ trigCustomInp.value=(trigVal.textContent==="—"||trigVal.textContent==="…")?"":trigVal.textContent; _setTrigEditMode(true); trigCustomInp.focus(); };
 
         // Load and display trigger words when lora changes
         const _refreshTrigWords=async(loraName)=>{
@@ -6282,46 +6372,106 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
               tx(trigVal,(d.ok&&d.triggers?.length)?d.triggers.join(", "):"—");
             }catch(e){ tx(trigVal,"—"); }
           }
+          // Collapse to display mode if a value exists, else show the input
+          _setTrigEditMode(false);
         };
 
         const ulDD=DD(["none"],"none",v=>{
           const has=v&&v!=="none";
           S.userLoras[idx].name=has?v:"";
-          if(!has){ S.userLoras[idx].strength=0; ulStr.value="0"; }
-          else if(S.userLoras[idx].strength===0){ S.userLoras[idx].strength=1; ulStr.value="1"; }
+          if(!has){
+            S.userLoras[idx].strength=0; ulStr.value="0";
+          } else {
+            // Selecting a LoRA: default to 1 only when strength is unset/zero
+            // (negative values are valid — concept sliders — so keep those),
+            // then always sync the input to the stored value, since an empty slot
+            // shows "0" while its state strength may already be 1.
+            const cur=+(S.userLoras[idx].strength);
+            if(!isFinite(cur)||cur===0) S.userLoras[idx].strength=1;
+            ulStr.value=String(S.userLoras[idx].strength);
+          }
           _ulUpdateBtn();persist();
           _refreshTrigWords(v);
         });
         ulDD.el.style.flex="1";ulDD.el.style.minWidth="0";
 
+        // type:"text" + inputmode:"decimal" so the numpad "." is accepted regardless
+        // of OS locale (type:"number" rejects "." on comma-locales). _pf() parses both.
         const ulStr=mk("input",{
-          width:"44px",textAlign:"center",background:"rgba(255,255,255,.06)",
-          border:`1px solid rgba(255,255,255,.1)`,borderRadius:"6px",
-          color:LIME,fontSize:"10px",fontWeight:"700",
-          padding:"5px 0",outline:"none",transition:"border-color .15s",flexShrink:"0",
-        },{type:"number",step:"0.05",value:String(S.userLoras[idx].name&&S.userLoras[idx].name!=="none"?S.userLoras[idx].strength||1:0)});
-        ulStr.onfocus=()=>ulStr.style.borderColor=LIME;
-        ulStr.onblur=()=>{ S.userLoras[idx].strength=isNaN(+ulStr.value)?1:+ulStr.value;
+          width:"46px",textAlign:"center",background:"rgba(255,255,255,.05)",
+          border:`1px solid rgba(255,255,255,.1)`,borderRadius:"7px",
+          color:LIME,fontSize:"11px",fontWeight:"700",cursor:"ew-resize",
+          padding:"6px 0",outline:"none",transition:"border-color .15s",flexShrink:"0",
+        },{type:"text",inputMode:"decimal",value:String(S.userLoras[idx].name&&S.userLoras[idx].name!=="none"?S.userLoras[idx].strength||1:0)});
+        ulStr.onfocus=()=>{ ulStr.style.borderColor=LIME; ulStr.select(); };
+        ulStr.onblur=()=>{ const p=_pf(ulStr.value); S.userLoras[idx].strength=isNaN(p)?1:p;
           ulStr.value=String(S.userLoras[idx].strength);persist(); };
-        ulStr.oninput=()=>{ S.userLoras[idx].strength=+ulStr.value||0;persist(); };
+        ulStr.oninput=()=>{ S.userLoras[idx].strength=_pf(ulStr.value)||0;persist(); };
+
+        // Drag-on-number: hold and drag horizontally to scrub the strength value,
+        // like native ComfyUI number widgets. A plain click (no drag) still focuses
+        // the field for typing — we only hijack the pointer once a real drag starts.
+        (()=>{
+          let armed=false,dragging=false,justDragged=false,startX=0,startVal=0,pid=0;
+          const STEP=0.01;       // value change per pixel
+          const THRESHOLD=3;     // px before it counts as a drag (vs a click)
+          ulStr.addEventListener("pointerdown",(e)=>{
+            armed=true;dragging=false;startX=e.clientX;pid=e.pointerId;
+            startVal=_pf(ulStr.value); if(isNaN(startVal)) startVal=0;
+            // No preventDefault / capture here, so a plain click still focuses to type.
+            // The drag only kicks in past THRESHOLD, so the caret keeps working for clicks
+            // even while the field is already focused (lets you type then drag to adjust).
+          });
+          ulStr.addEventListener("pointermove",(e)=>{
+            if(!armed) return;
+            const dx=e.clientX-startX;
+            if(!dragging){
+              if(Math.abs(dx)<THRESHOLD) return; // still within click tolerance
+              dragging=true;
+              if(document.activeElement===ulStr) ulStr.blur(); // leave edit mode when a drag begins
+              try{ ulStr.setPointerCapture(pid); }catch(_){}
+            }
+            let v=startVal+dx*STEP;
+            v=Math.round(v*100)/100;
+            ulStr.value=String(v);
+            S.userLoras[idx].strength=v; persist();
+          });
+          ulStr.addEventListener("pointerup",()=>{
+            if(!armed) return;
+            armed=false;
+            if(dragging){
+              try{ ulStr.releasePointerCapture(pid); }catch(_){}
+              ulStr.blur();           // committed via drag — don't enter edit mode
+              justDragged=true;       // swallow the trailing click
+              setTimeout(()=>{ justDragged=false; },0);
+            }
+            dragging=false;
+          });
+          ulStr.addEventListener("pointercancel",()=>{ armed=false;dragging=false; });
+          // Swallow the click that immediately follows a real drag (so it doesn't focus)
+          ulStr.addEventListener("click",(e)=>{ if(justDragged){ e.preventDefault();e.stopPropagation(); } });
+        })();
 
         const ulClr=mk("button",{
-          background:"rgba(255,80,80,.08)",border:"1px solid rgba(255,80,80,.25)",borderRadius:"6px",
-          cursor:"pointer",color:"rgba(255,100,100,.7)",fontSize:"9px",fontWeight:"700",
-          padding:"5px 8px",outline:"none",transition:"all .15s",flexShrink:"0",
+          background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.12)",borderRadius:"7px",
+          cursor:"pointer",color:C.muted,fontSize:"9px",fontWeight:"700",letterSpacing:".04em",
+          padding:"6px 9px",outline:"none",transition:"all .15s",flexShrink:"0",
         });
         tx(ulClr,"CLR");
-        ulClr.onmouseenter=()=>{ ulClr.style.background="rgba(255,80,80,.18)";ulClr.style.color="#ff6666"; };
-        ulClr.onmouseleave=()=>{ ulClr.style.background="rgba(255,80,80,.08)";ulClr.style.color="rgba(255,100,100,.7)"; };
+        ulClr.onmouseenter=()=>{ ulClr.style.background="rgba(255,80,80,.14)";ulClr.style.borderColor="rgba(255,80,80,.3)";ulClr.style.color="#ff7777"; };
+        ulClr.onmouseleave=()=>{ ulClr.style.background="rgba(255,255,255,.05)";ulClr.style.borderColor="rgba(255,255,255,.12)";ulClr.style.color=C.muted; };
         ulClr.onclick=()=>{
           S.userLoras[idx]={name:"",strength:0};ulDD.set("none");ulStr.value="0";
-          _ulUpdateBtn();persist();
           trigRow.style.display="none";
+          _ulUpdateBtn();persist();
         };
 
-        rowCtrl.append(ulDD.el,ulStr,ulClr);
-        row.append(rowLbl,rowCtrl,trigRow);
+        rowCtrl.append(_rowNum,ulDD.el,ulStr,ulClr);
+        row.append(rowCtrl,trigRow);
         row._dd=ulDD;row._str=ulStr;
+        // Clear the slot's UI completely, including the trigger row (used on restore).
+        row._reset=()=>{ ulDD.set("none"); ulStr.value="0"; trigRow.style.display="none"; };
+        row._refreshTrig=_refreshTrigWords;
 
         // Restore trigger words display if lora already selected
         if(S.userLoras[idx].name&&S.userLoras[idx].name!=="none"){
@@ -6329,8 +6479,89 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         }
         return row;
       };
-      const _ulRowEls=[_mkULRow(0),_mkULRow(1),_mkULRow(2)];
-      _ulRowEls.forEach(r=>_ulRows.appendChild(r));
+      // Dynamic LoRA slots: default 3, user can add up to _UL_MAX.
+      let _ulRowEls=[];
+      let _ulAddBtn=null, _ulRemoveBtn=null;  // assigned below; declared here for _ulRebuildRows
+      const _ulSyncBtnRow=()=>{
+        if(_ulAddBtn) _ulAddBtn.style.display=S.userLoras.length>=_UL_MAX?"none":"flex";
+        if(_ulRemoveBtn) _ulRemoveBtn.style.display=S.userLoras.length>_UL_DEFAULT?"flex":"none";
+      };
+      // Clamp restored state to [_UL_DEFAULT, _UL_MAX]
+      while(S.userLoras.length<_UL_DEFAULT) S.userLoras.push({name:"",strength:1.0});
+      if(S.userLoras.length>_UL_MAX) S.userLoras.length=_UL_MAX;
+
+      const _ulRebuildRows=()=>{
+        _ulRows.innerHTML="";
+        _ulRowEls=S.userLoras.map((_,i)=>_mkULRow(i));
+        _ulRowEls.forEach(r=>_ulRows.appendChild(r));
+        _ulSyncBtnRow();
+      };
+
+      // Re-populate every slot's dropdown from the current model list (used after
+      // adding/removing a slot so freshly-built rows show the available LoRAs).
+      // Never wipe a saved name when the model list is empty (e.g. models not loaded
+      // yet) — that would silently drop the user's selections in the other slots.
+      const _ulSyncSlotsToModels=()=>{
+        const haveList=Array.isArray(_loraList)&&_loraList.length>0;
+        const loraOpts=["none",...(_loraList||[])];
+        _ulRowEls.forEach((r,i)=>{
+          r._dd.updateItems(loraOpts);
+          const saved=S.userLoras[i]?.name;
+          if(saved&&saved!=="none"){
+            const nd=(s)=>s.replace(/\\/g,"/").toLowerCase();
+            const match=loraOpts.find(o=>nd(o)===nd(saved))||
+              loraOpts.find(o=>nd(o).split("/").pop()===nd(saved).split("/").pop());
+            if(match){ r._dd.set(match); S.userLoras[i].name=match; }
+            else if(haveList){ r._dd.set("none"); S.userLoras[i].name=""; }
+            // else: list not loaded — keep the saved name, leave the dropdown as-is
+          } else r._dd.set("none");
+        });
+      };
+
+      const _ulAddSlot=()=>{
+        if(S.userLoras.length>=_UL_MAX) return;
+        S.userLoras.push({name:"",strength:1.0});
+        _ulRebuildRows();
+        _ulSyncSlotsToModels();
+        persist();
+      };
+
+      const _ulRemoveSlot=()=>{
+        if(S.userLoras.length<=_UL_DEFAULT) return;
+        S.userLoras.pop();
+        _ulRebuildRows();
+        _ulSyncSlotsToModels();
+        _ulUpdateBtn();persist();
+      };
+
+      _ulRebuildRows();
+
+      // Add / Remove-last slot buttons — sit together in one row below the slots
+      const _ulBtnRow=mk("div",{display:"flex",gap:"8px"});
+      _ulAddBtn=mk("button",{
+        flex:"1",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",
+        background:"rgba(240,255,65,.06)",border:`1px dashed rgba(240,255,65,.3)`,
+        borderRadius:"8px",cursor:"pointer",color:LIME,fontSize:"10px",fontWeight:"700",
+        letterSpacing:".05em",padding:"8px",outline:"none",transition:"all .15s",
+      });
+      tx(_ulAddBtn,"+ Add slot");
+      _ulAddBtn.onmouseenter=()=>{ _ulAddBtn.style.background="rgba(240,255,65,.12)";_ulAddBtn.style.borderColor=LIME; };
+      _ulAddBtn.onmouseleave=()=>{ _ulAddBtn.style.background="rgba(240,255,65,.06)";_ulAddBtn.style.borderColor="rgba(240,255,65,.3)"; };
+      _ulAddBtn.onclick=_ulAddSlot;
+
+      _ulRemoveBtn=mk("button",{
+        flex:"1",display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",
+        background:"rgba(255,80,80,.05)",border:`1px dashed rgba(255,80,80,.25)`,
+        borderRadius:"8px",cursor:"pointer",color:"rgba(255,120,120,.8)",fontSize:"10px",fontWeight:"700",
+        letterSpacing:".05em",padding:"8px",outline:"none",transition:"all .15s",
+      });
+      tx(_ulRemoveBtn,"− Remove last slot");
+      _ulRemoveBtn.onmouseenter=()=>{ _ulRemoveBtn.style.background="rgba(255,80,80,.12)";_ulRemoveBtn.style.borderColor="rgba(255,80,80,.45)";_ulRemoveBtn.style.color="#ff8888"; };
+      _ulRemoveBtn.onmouseleave=()=>{ _ulRemoveBtn.style.background="rgba(255,80,80,.05)";_ulRemoveBtn.style.borderColor="rgba(255,80,80,.25)";_ulRemoveBtn.style.color="rgba(255,120,120,.8)"; };
+      _ulRemoveBtn.onclick=_ulRemoveSlot;
+
+      _ulBtnRow.append(_ulAddBtn,_ulRemoveBtn);
+      _ulSyncBtnRow();
 
       // Info note at bottom of panel
       const _ulInfoNote=mk("div",{
@@ -6340,9 +6571,32 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       });
       tx(_ulInfoNote,"✦ Trigger words are applied automatically if saved and set for the selected LoRA.");
 
-      _ulPanel.append(_ulPHdr,_ulPSub,_ulRows,_ulInfoNote);
+      // OK button — confirm/close the panel (Enter also closes it)
+      const _ulOkBtn=mk("button",{
+        alignSelf:"flex-end",background:LIME,border:"none",borderRadius:"8px",
+        color:"#0a0a0a",fontSize:"11px",fontWeight:"700",letterSpacing:".06em",
+        padding:"8px 22px",cursor:"pointer",outline:"none",transition:"filter .12s",
+      });
+      tx(_ulOkBtn,"OK");
+      _ulOkBtn.onmouseenter=()=>_ulOkBtn.style.filter="brightness(1.1)";
+      _ulOkBtn.onmouseleave=()=>_ulOkBtn.style.filter="";
+      _ulOkBtn.onclick=_ulCloseFn;
+
+      _ulPanel.append(_ulPHdr,_ulPSub,_ulRows,_ulBtnRow,_ulInfoNote,_ulOkBtn);
       _ulOverlay.append(_ulBg,_ulPanel);
       root.appendChild(_ulOverlay);
+
+      // Enter / Escape close the panel (unless focus is in a text field that needs Enter)
+      document.addEventListener("keydown",(e)=>{
+        if(_ulOverlay.style.display==="none") return;
+        if(e.key==="Escape"){ e.preventDefault();e.stopPropagation();_ulCloseFn();return; }
+        if(e.key!=="Enter") return;
+        const t=e.target||{};
+        if(t.tagName==="TEXTAREA") return;
+        if(t.tagName==="INPUT"&&(t.type==="text"||t.type==="search")) return;
+        e.preventDefault();e.stopPropagation();
+        _ulCloseFn();
+      },{capture:true});
 
       // ── Collect trigger words for all active LoRAs at generate time ────────
       const _buildPromptWithTriggers=async(basePrompt)=>{
@@ -6386,7 +6640,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       _ulBtn.append(_ulBtnIco,_ulBtnTxt,_ulBtnBadge);
       _ulBtn.onmouseenter=()=>{ _ulBtn.style.background="linear-gradient(135deg,rgba(240,255,65,.18),rgba(240,255,65,.08))";_ulBtn.style.borderColor=LIME;_ulBtn.style.boxShadow="0 0 8px rgba(240,255,65,.12)"; };
       _ulBtn.onmouseleave=()=>{ _ulBtn.style.background="linear-gradient(135deg,rgba(240,255,65,.10),rgba(240,255,65,.04))";_ulBtn.style.borderColor="rgba(240,255,65,.35)";_ulBtn.style.boxShadow="0 0 0 0 rgba(240,255,65,0)"; };
-      _ulBtn.onclick=()=>{ _ulOverlay.style.display="flex";showDimmer(); };
+      _ulBtn.onclick=()=>{ _ulOverlay.style.display="flex"; };
 
       const _ulUpdateBtn=()=>{
         const n=S.userLoras.filter(l=>l.name&&l.name!=="none").length;
@@ -7814,7 +8068,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           set("FKI2I:img","image",   S.i2iImage||"placeholder.png");
           set("FK:86","filename_prefix","one-node-flux-2-klein/FK");
 
-          // Resize input image by longer side if enabled
+          // Resize input image by longer side if enabled (explicit user override)
+          let _i2iResized=false;
           if(S.i2iResizeLonger>0){
             const dims=_i2iDims._getDims();
             if(dims.w&&dims.h){
@@ -7827,7 +8082,19 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
                 _meta:{title:"Scale I2I Input"},
               };
               prompt["FKI2I:vae"].inputs.pixels=["FKI2I:scale",0];
+              _i2iResized=true;
             }
+          }
+          // Reference downscale toggle (I2I) — only when no explicit longer-side
+          // resize is active. Inserts a ScaleToTotalPixels before the VAE encode.
+          if(!_i2iResized&&S.downscaleRef){
+            const mp=+(S.downscaleRefMP)>0?+(S.downscaleRefMP):1.0;
+            prompt["FKI2I:scaleMP"]={
+              class_type:"ImageScaleToTotalPixels",
+              inputs:{image:["FKI2I:img",0],upscale_method:"lanczos",megapixels:mp,resolution_steps:1},
+              _meta:{title:"Downscale I2I Input"},
+            };
+            prompt["FKI2I:vae"].inputs.pixels=["FKI2I:scaleMP",0];
           }
 
           // KV + LoRA chain → ModelSamplingAuraFlow → KSampler
@@ -7925,6 +8192,29 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
               delete prompt[WF.refNeg2];
               set(WF.sampler,"positive",[WF.refPos1,0]);
               set(WF.sampler,"negative",[WF.refNeg1,0]);
+            }
+
+            // Reference downscale toggle — applies to EDIT and SKETCH (both send
+            // the input/canvas into the VAE encoder through this workflow).
+            if(S.downscaleRef){
+              // ON: route VAE encode through the scale node and set megapixels.
+              // (Sketch + img1-source paths normally bypass the scale node, so we
+              // must re-wire the encoder onto it here, not just set megapixels.)
+              const mp=+(S.downscaleRefMP)>0?+(S.downscaleRefMP):1.0;
+              if(prompt[WF.scaleImg1]){
+                prompt[WF.scaleImg1].inputs.megapixels=mp;
+                if(prompt[WF.vaeEnc1]) prompt[WF.vaeEnc1].inputs.pixels=[WF.scaleImg1,0];
+              }
+              if(prompt[WF.scaleImg2]){
+                prompt[WF.scaleImg2].inputs.megapixels=mp;
+                if(prompt[WF.vaeEnc2]) prompt[WF.vaeEnc2].inputs.pixels=[WF.scaleImg2,0];
+              }
+            } else {
+              // OFF: bypass scale nodes — VAE-encode the full-resolution inputs.
+              if(prompt[WF.vaeEnc1]) prompt[WF.vaeEnc1].inputs.pixels=[WF.loadImage1,0];
+              if(prompt[WF.vaeEnc2]) prompt[WF.vaeEnc2].inputs.pixels=[WF.loadImage2,0];
+              delete prompt[WF.scaleImg1];
+              delete prompt[WF.scaleImg2];
             }
           }
         }
@@ -8630,10 +8920,21 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
             S.randomizeSeed=false; S.seed=meta.seed;
             seedInp.setVal(meta.seed); _advSeedInp.setVal(meta.seed); _advSeedRefresh();
           }
-          // LoRAs — always reset all slots first, then apply what meta has
+          // LoRAs — grow slots if the saved generation used more than we currently show
+          const _metaLoraCount=Array.isArray(meta.userLoras)?meta.userLoras.length:0;
+          const _wantSlots=Math.min(_UL_MAX,Math.max(_UL_DEFAULT,_metaLoraCount));
+          if(S.userLoras.length!==_wantSlots){
+            if(S.userLoras.length<_wantSlots){
+              while(S.userLoras.length<_wantSlots) S.userLoras.push({name:"",strength:1.0});
+            } else {
+              S.userLoras.length=_wantSlots;
+            }
+            _ulRebuildRows();
+          }
+          // Always reset all slots first (incl. trigger rows), then apply what meta has
           _ulRowEls.forEach((r,i)=>{
             S.userLoras[i]={name:"",strength:0};
-            r._dd.set("none"); r._str.value="0";
+            r._reset();
           });
           if(Array.isArray(meta.userLoras)&&meta.userLoras.length&&_loraList.length){
             const nd=(s)=>(s||"").replace(/\\/g,"/").toLowerCase();
@@ -8646,6 +8947,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
               if(match&&match!=="none"){
                 S.userLoras[i].name=match; S.userLoras[i].strength=+(ul.s??1);
                 _ulRowEls[i]._dd.set(match); _ulRowEls[i]._str.value=String(S.userLoras[i].strength);
+                _ulRowEls[i]._refreshTrig(match);
               }
             });
           }
@@ -9125,15 +9427,30 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
 
       // ── Paste image from clipboard (Ctrl+V) ──────────────────────────────────
       document.addEventListener("paste",async(e)=>{
-        if(!_mouseOverRoot) return;
+        const _sketchOpen=_sketchOv&&_sketchOv.style.display!=="none";
+        if(!_mouseOverRoot&&!_sketchOpen) return;
         const tag=(document.activeElement||{}).tagName||"";
         if(tag==="INPUT"||tag==="TEXTAREA") return;
         const items=[...(e.clipboardData?.items||[])];
         const imgItem=items.find(i=>i.type.startsWith("image/"));
         if(!imgItem) return;
         e.preventDefault();e.stopPropagation();
-        const file=imgItem.getAsFile();
-        if(!file) return;
+        const raw=imgItem.getAsFile();
+        if(!raw) return;
+        // Clipboard files all share the same generic name ("image.png"), so two
+        // pastes would overwrite each other in the input folder (overwrite:true)
+        // and both slots would end up pointing at the same file. Give each paste
+        // a unique name so the slots stay independent.
+        const ext=(raw.type.split("/")[1]||"png").replace("jpeg","jpg");
+        const uniqueName=`pasted_${Date.now()}_${Math.floor(Math.random()*1e4)}.${ext}`;
+        let file;
+        try{ file=new File([raw],uniqueName,{type:raw.type}); }
+        catch(_){ file=raw; file.name=uniqueName; } // fallback for older browsers
+        // If the Sketch canvas is open, paste the image as a new layer instead.
+        if(_sketchOv&&_sketchOv.style.display!=="none"){
+          _sketchAddImageLayer(file);
+          return;
+        }
         // Pick target slot based on active pill and slot state
         let targetSlot=null;
         if(activePill==="edit"){
