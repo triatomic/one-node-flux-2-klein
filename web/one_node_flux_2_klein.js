@@ -6187,7 +6187,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       const previewUseDrop=mk("div",{
         position:"absolute",top:"calc(100% + 4px)",right:"0",
         background:C.bg1,border:`1px solid ${C.borderH}`,borderRadius:"8px",
-        minWidth:"160px",overflow:"hidden",display:"none",zIndex:"200",
+        minWidth:"160px",overflowY:"auto",overflowX:"hidden",display:"none",zIndex:"200",
+        maxHeight:"340px",scrollbarWidth:"thin",scrollbarColor:`${C.border} transparent`,
         boxShadow:"0 4px 20px rgba(0,0,0,.7)",flexDirection:"column",
       });
       const _mkPUSection=(label)=>{ const h=mk("div",{padding:"6px 12px 3px",fontSize:"8px",fontWeight:"700",letterSpacing:".08em",textTransform:"uppercase",color:C.muted,userSelect:"none"});tx(h,label);return h; };
