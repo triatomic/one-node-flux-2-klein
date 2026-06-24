@@ -5998,7 +5998,32 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       tx(_poseRefLbl,"Reference");
       _poseRefCard.append(_poseRefSlot.el,_poseRefLbl,_poseRefDims);
 
-      _poseSlotRow.append(_poseImgCard,_poseRefCard);
+      // Swap button between Pose / Reference slots — marginTop centers it on the 88px slot
+      const _poseSwapBtn=mk("button",{
+        background:"transparent",border:`1px solid ${C.border}`,borderRadius:"6px",
+        width:"24px",height:"24px",padding:"0",cursor:"pointer",color:C.muted,outline:"none",
+        flexShrink:"0",marginTop:"32px",
+        display:"flex",alignItems:"center",justifyContent:"center",lineHeight:"0",
+        transition:"border-color .15s,color .15s",
+      });
+      _poseSwapBtn.title="Swap Pose ↔ Reference";
+      _poseSwapBtn.innerHTML=`<svg viewBox="0 0 10 14" width="9" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 1L1 3.5L3 6"/><line x1="1" y1="3.5" x2="9" y2="3.5"/><path d="M7 8L9 10.5L7 13"/><line x1="9" y1="10.5" x2="1" y2="10.5"/></svg>`;
+      _poseSwapBtn.onmouseenter=()=>{_poseSwapBtn.style.borderColor=LIME;_poseSwapBtn.style.color=LIME;};
+      _poseSwapBtn.onmouseleave=()=>{_poseSwapBtn.style.borderColor=C.border;_poseSwapBtn.style.color=C.muted;};
+      _poseSwapBtn.onclick=()=>{
+        const np=S.poseImage,nr=S.poseRef;
+        S.poseImage=nr||null;S.poseRef=np||null;
+        _poseImgSlot._restorePreview(S.poseImage);
+        _poseRefSlot._restorePreview(S.poseRef);
+        const dp=_poseImgDims._getDims(),dr=_poseRefDims._getDims();
+        _poseImgDims._set(dr.w||0,dr.h||0);
+        _poseRefDims._set(dp.w||0,dp.h||0);
+        if(S.poseImage){ _poseImgSlot.el.style.borderColor=""; tx(_poseImgLbl,"Pose"); _poseImgLbl.style.color=C.muted; }
+        if(S.poseRef){ _poseRefSlot.el.style.borderColor=""; tx(_poseRefLbl,"Reference"); _poseRefLbl.style.color=C.muted; }
+        persist();
+      };
+
+      _poseSlotRow.append(_poseImgCard,_poseSwapBtn,_poseRefCard);
 
       // Depth model chooser — defaults to Large; user can pick other DA3 variants
       const POSE_DEPTH_MODELS=["da3_large.safetensors","da3_giant.safetensors","da3_base.safetensors","da3_small.safetensors","da3mono_large.safetensors","da3metric_large.safetensors","da3nested_giant_large.safetensors"];
