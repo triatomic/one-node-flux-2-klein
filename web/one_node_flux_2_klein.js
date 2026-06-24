@@ -580,6 +580,7 @@ app.registerExtension({
           // Default ON at 1 MP = the existing behaviour, so existing users see no change.
           downscaleRef:   saved.downscaleRef!==undefined?saved.downscaleRef:true,
           downscaleRefMP: saved.downscaleRefMP!==undefined?saved.downscaleRefMP:1.0,
+          comparerMode: saved.comparerMode||"hover", // before/after view: "hover" (drag slider) | "button" (Before/Split/After)
           previewUrl:   null,
         };
       }
@@ -610,6 +611,7 @@ app.registerExtension({
           i2iImage:S.i2iImage, i2iDenoise:S.i2iDenoise, i2iResizeLonger:S.i2iResizeLonger,
           userLoras:S.userLoras, soundEnabled, extLoaders:S.extLoaders,
           downscaleRef:S.downscaleRef, downscaleRefMP:S.downscaleRefMP,
+          comparerMode:S.comparerMode,
         });
       };
 
@@ -978,6 +980,12 @@ app.registerExtension({
         _refreshExtInputUI();
       });
 
+      // Before/after comparer style: drag slider (default) vs multi-state button
+      const comparerModeToggle=Toggle("Before/After button (Before·Split·After) instead of drag slider",S.comparerMode==="button",v=>{
+        S.comparerMode=v?"button":"hover";persist();
+        _cmpApplyMode();
+      });
+
       // ── Downscale reference images (EDIT + I2I) ──────────────────────────────
       const _dsRow=mk("div",{display:"flex",flexDirection:"column",gap:"5px",padding:"9px 0",borderBottom:`1px solid ${C.border}`});
       const _dsTop=mk("div",{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px"});
@@ -1022,7 +1030,7 @@ app.registerExtension({
       _dsRow.append(_dsTop,_dsHint);
       _dsApplyEnabled();
 
-      settingsOverlay.append(settHdr,modGrid,_kvNote,_baseNote,modGrid2,prefTitle,soundToggle.el,advUIToggle.el,extLoadersToggle.el,_dsRow);
+      settingsOverlay.append(settHdr,modGrid,_kvNote,_baseNote,modGrid2,prefTitle,soundToggle.el,advUIToggle.el,extLoadersToggle.el,comparerModeToggle.el,_dsRow);
 
       // ── Overlay helpers ───────────────────────────────────────────────────
       const openOverlay=(el)=>{
@@ -1485,13 +1493,13 @@ app.registerExtension({
               cLine.style.left=`calc(${pct}% - 1px)`;
               cGenImg.style.width=(cWrap.offsetWidth||900)+"px";
             };
-            let _fsDrag=false;
-            cWrap.addEventListener("mousedown",e=>{_fsDrag=true;e.preventDefault();});
+            let _fsDrag=false, _fsDragOK=true, _fsState="after";
+            cWrap.addEventListener("mousedown",e=>{if(!_fsDragOK)return;_fsDrag=true;e.preventDefault();});
             const _fsMM=(e)=>{if(!_fsDrag)return;const r=cWrap.getBoundingClientRect();_fsSetPct((e.clientX-r.left)/r.width*100);};
             const _fsMU=()=>{_fsDrag=false;};
             document.addEventListener("mousemove",_fsMM);
             document.addEventListener("mouseup",_fsMU);
-            cWrap.addEventListener("touchstart",()=>{_fsDrag=true;},{passive:true});
+            cWrap.addEventListener("touchstart",()=>{if(_fsDragOK)_fsDrag=true;},{passive:true});
             cWrap.addEventListener("touchmove",e=>{if(!_fsDrag)return;const r=cWrap.getBoundingClientRect();_fsSetPct((e.touches[0].clientX-r.left)/r.width*100);},{passive:true});
             cWrap.addEventListener("touchend",()=>{_fsDrag=false;});
             ov._cleanupCmp=()=>{document.removeEventListener("mousemove",_fsMM);document.removeEventListener("mouseup",_fsMU);};
@@ -1499,7 +1507,47 @@ app.registerExtension({
             _nfMediaWrap.style.position="relative";
             _nfMediaWrap.style.padding="0"; // comparer fills full area
             _nfMediaWrap.appendChild(cWrap);
-            cGenImg.onload=()=>{ _fsSetPct(100); };
+            // Button mode mirrors the inline comparer: cycle Before / Split / After.
+            // Appended to cWrap so it's auto-removed when the overlay clears.
+            let _fsModeBtn=null;
+            const _fsApplyMode=()=>{
+              if(S.comparerMode==="button"){
+                const st=_CMP_STATES.find(s=>s.k===_fsState)||_CMP_STATES[0];
+                _fsSetPct(st.pct);
+                const split=st.k==="split";
+                cLine.style.display=split?"flex":"none";
+                cWrap.style.cursor=split?"col-resize":"default";
+                _fsDragOK=split;
+                if(_fsModeBtn){ tx(_fsModeBtn,`${st.ico} ${st.lbl}`); _fsModeBtn.style.display="flex"; }
+              } else {
+                if(_fsModeBtn) _fsModeBtn.style.display="none";
+                cLine.style.display="flex";
+                cWrap.style.cursor="col-resize";
+                _fsDragOK=true;
+                _fsSetPct(100);
+              }
+            };
+            if(S.comparerMode==="button"){
+              _fsModeBtn=mk("button",{
+                position:"absolute",top:"54px",left:"14px",zIndex:"10",
+                background:"rgba(20,20,20,.82)",color:"rgba(255,255,255,.9)",
+                border:"1px solid rgba(255,255,255,.2)",borderRadius:"6px",
+                padding:"5px 12px",fontSize:"10px",fontWeight:"600",cursor:"pointer",
+                outline:"none",whiteSpace:"nowrap",letterSpacing:".03em",
+                boxShadow:"0 2px 8px rgba(0,0,0,.5)",backdropFilter:"blur(4px)",
+                display:"flex",alignItems:"center",gap:"6px",
+              });
+              _fsModeBtn.title="Click to cycle Before / Split / After";
+              _fsModeBtn.onmouseenter=()=>{_fsModeBtn.style.borderColor=LIME;_fsModeBtn.style.color=LIME;};
+              _fsModeBtn.onmouseleave=()=>{_fsModeBtn.style.borderColor="rgba(255,255,255,.2)";_fsModeBtn.style.color="rgba(255,255,255,.9)";};
+              _fsModeBtn.addEventListener("mousedown",e=>e.stopPropagation());
+              _fsModeBtn.onclick=(e)=>{ e.stopPropagation();
+                const i=_CMP_STATES.findIndex(s=>s.k===_fsState);
+                _fsState=_CMP_STATES[(i+1)%_CMP_STATES.length].k; _fsApplyMode();
+              };
+              cWrap.appendChild(_fsModeBtn);
+            }
+            cGenImg.onload=()=>{ _fsApplyMode(); };
             // "Use as input" button — top-right corner of the overlay
             if(onUse){
               const useBtn=mk("button",{
@@ -6050,6 +6098,8 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
 
       // Drag logic
       let _cmpDragging=false;
+      let _cmpDragEnabled=true;   // hover mode: always; button mode: only in "split" state
+      let _cmpBtnState="after";   // button mode current state: after | before | split
       const _cmpSetPct=(pct)=>{
         pct=Math.max(0,Math.min(100,pct));
         comparerGen.style.width=pct+"%";
@@ -6058,6 +6108,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       };
 
       comparerWrap.addEventListener("mousedown",e=>{
+        if(!_cmpDragEnabled) return;
         _cmpDragging=true;e.preventDefault();
       });
       document.addEventListener("mousemove",e=>{
@@ -6066,13 +6117,59 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         _cmpSetPct((e.clientX-r.left)/r.width*100);
       });
       document.addEventListener("mouseup",()=>{ _cmpDragging=false; });
-      comparerWrap.addEventListener("touchstart",()=>{_cmpDragging=true;},{passive:true});
+      comparerWrap.addEventListener("touchstart",()=>{if(_cmpDragEnabled)_cmpDragging=true;},{passive:true});
       comparerWrap.addEventListener("touchmove",e=>{
         if(!_cmpDragging) return;
         const r=comparerWrap.getBoundingClientRect();
         _cmpSetPct((e.touches[0].clientX-r.left)/r.width*100);
       },{passive:true});
       comparerWrap.addEventListener("touchend",()=>{ _cmpDragging=false; });
+
+      // ── Multi-state Before/After button (alternative to the drag slider) ──
+      // Shown when Settings → comparer mode = "button". Cycles Before → Split → After.
+      // "Split" re-enables the draggable divider so the slider stays available.
+      const _CMP_STATES=[
+        {k:"after", lbl:"After",  pct:100, ico:"◑"},
+        {k:"before",lbl:"Before", pct:0,   ico:"◐"},
+        {k:"split", lbl:"Split",  pct:50,  ico:"⇋"},
+      ];
+      const comparerModeBtn=mk("button",{
+        position:"absolute",top:"14px",left:"14px",zIndex:"6",
+        background:"rgba(20,20,20,.82)",color:"rgba(255,255,255,.9)",
+        border:"1px solid rgba(255,255,255,.2)",borderRadius:"6px",
+        padding:"5px 11px",fontSize:"10px",fontWeight:"600",cursor:"pointer",
+        outline:"none",whiteSpace:"nowrap",display:"none",letterSpacing:".03em",
+        boxShadow:"0 2px 8px rgba(0,0,0,.5)",backdropFilter:"blur(4px)",
+        alignItems:"center",gap:"6px",
+      });
+      comparerModeBtn.onmouseenter=()=>{comparerModeBtn.style.borderColor=LIME;comparerModeBtn.style.color=LIME;};
+      comparerModeBtn.onmouseleave=()=>{comparerModeBtn.style.borderColor="rgba(255,255,255,.2)";comparerModeBtn.style.color="rgba(255,255,255,.9)";};
+      comparerModeBtn.addEventListener("mousedown",e=>e.stopPropagation());
+      const _cmpApplyMode=()=>{
+        if(S.comparerMode==="button"){
+          const st=_CMP_STATES.find(s=>s.k===_cmpBtnState)||_CMP_STATES[0];
+          _cmpSetPct(st.pct);
+          const split=st.k==="split";
+          comparerLine.style.display=split?"flex":"none";
+          comparerWrap.style.cursor=split?"col-resize":"default";
+          _cmpDragEnabled=split;
+          tx(comparerModeBtn,`${st.ico} ${st.lbl}`);
+          comparerModeBtn.title="Click to cycle Before / Split / After";
+          comparerModeBtn.style.display="flex";
+        } else {
+          comparerModeBtn.style.display="none";
+          comparerLine.style.display="flex";
+          comparerWrap.style.cursor="col-resize";
+          _cmpDragEnabled=true;
+        }
+      };
+      comparerModeBtn.onclick=(e)=>{
+        e.stopPropagation();
+        const i=_CMP_STATES.findIndex(s=>s.k===_cmpBtnState);
+        _cmpBtnState=_CMP_STATES[(i+1)%_CMP_STATES.length].k;
+        _cmpApplyMode();
+      };
+      comparerWrap.appendChild(comparerModeBtn);
 
       // "Use as…" dropdown — top-right of previewBox, visible after generation
       const previewUseWrap=mk("div",{
@@ -7663,6 +7760,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           comparerWrap.style.display="block";
           previewUseWrap.style.display="block";
           _cmpSetPct(100);
+          _cmpBtnState="after"; _cmpApplyMode();
         };
         // Use snapshot mode/image so switching pills mid-generation doesn't corrupt comparer
         const _snapMode=S._pendingMeta?.mode||activePill;
