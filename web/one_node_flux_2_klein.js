@@ -6347,9 +6347,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         enTog.appendChild(enThumb);
 
         // Trigger words area — shown below the control row (subtle, not a heavy block).
-        // paddingLeft aligns it under the dropdown: toggle(30)+gap(7)+badge(17)+gap(7).
+        // paddingLeft aligns it under the dropdown: badge(17)+gap(7).
         const trigRow=mk("div",{display:"none",flexDirection:"column",gap:"6px",
-          marginTop:"1px",paddingLeft:"61px",
+          marginTop:"1px",paddingLeft:"24px",
         });
         const trigTopRow=mk("div",{display:"flex",alignItems:"baseline",gap:"6px"});
         const trigLbl=mk("div",{fontSize:"8px",fontWeight:"700",color:C.muted,whiteSpace:"nowrap",
@@ -6512,22 +6512,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           ulStr.addEventListener("click",(e)=>{ if(justDragged){ e.preventDefault();e.stopPropagation(); } });
         })();
 
-        const ulClr=mk("button",{
-          background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.12)",borderRadius:"7px",
-          cursor:"pointer",color:C.muted,fontSize:"9px",fontWeight:"700",letterSpacing:".04em",
-          padding:"6px 9px",outline:"none",transition:"all .15s",flexShrink:"0",
-        });
-        tx(ulClr,"CLR");
-        ulClr.onmouseenter=()=>{ ulClr.style.background="rgba(255,80,80,.14)";ulClr.style.borderColor="rgba(255,80,80,.3)";ulClr.style.color="#ff7777"; };
-        ulClr.onmouseleave=()=>{ ulClr.style.background="rgba(255,255,255,.05)";ulClr.style.borderColor="rgba(255,255,255,.12)";ulClr.style.color=C.muted; };
-        ulClr.onclick=()=>{
-          S.userLoras[idx]={name:"",strength:0,enabled:true};ulDD.set("none");ulStr.value="0";
-          trigRow.style.display="none";_applyEnabled();
-          _ulUpdateBtn();persist();
-        };
-
         // Reflect the slot's enabled state: move the switch and dim the controls
         // when off (values are kept — only generation skips a disabled slot).
+        // To fully empty a slot, set the dropdown to "none" (handled in ulDD onChange).
         const _applyEnabled=()=>{
           const en=S.userLoras[idx].enabled!==false;
           enTog.style.background=en?"rgba(240,255,65,.85)":"rgba(255,255,255,.13)";
@@ -6535,14 +6522,14 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
           enThumb.style.background=en?"#111":"#888";
           const op=en?"1":"0.4";
           _rowNum.style.opacity=op; ulDD.el.style.opacity=op;
-          ulStr.style.opacity=op; ulClr.style.opacity=op; trigRow.style.opacity=op;
+          ulStr.style.opacity=op; trigRow.style.opacity=op;
         };
         enTog.onclick=()=>{
           S.userLoras[idx].enabled=!(S.userLoras[idx].enabled!==false);
           _applyEnabled();_ulUpdateBtn();persist();
         };
 
-        rowCtrl.append(enTog,_rowNum,ulDD.el,ulStr,ulClr);
+        rowCtrl.append(_rowNum,ulDD.el,ulStr,enTog);
         row.append(rowCtrl,trigRow);
         row._dd=ulDD;row._str=ulStr;
         // Clear the slot's UI completely, including the trigger row (used on restore).
