@@ -499,8 +499,6 @@ let _activeBatchN=1; // batch size SNAPSHOTTED at Generate-click time — the co
                      // must use this, not the live S.batchCount, so changing the ×N dropdown
                      // mid-run can't mis-route the result set (drop/mis-slice fresh images).
 
-// Registry of all live FluxKlein nodes, keyed by graph id (kept for cleanup on remove).
-const _fkNodes = {};
 
 // True when ComfyUI's "Nodes 2.0" (Vue node rendering) is enabled. We must NOT set the DOM
 // widget canvasOnly in that mode: Vue renders the node body itself and skips canvasOnly widgets,
@@ -556,6 +554,9 @@ function _oneNodeThrowawayEnd(){
   setTimeout(()=>{ window.__oneNodeThrowaway=false; },0);
 }
 function _oneNodeThrowawayActive(){ return !!window.__oneNodeThrowaway; }
+// True when an event belongs to OUR in-flight generation. The throwaway flag is a global
+// boolean, so without this check a real run finishing while it is up would be swallowed.
+function _isOurRun(pid){ return !!(pid && _activeS?.generating && pid===_activePromptIdRef?.()); }
 // Hard reset at the start of a real user generation so a stuck flag never silences it.
 function _oneNodeThrowawayForceClear(){ clearTimeout(window.__oneNodeThrowawayT); window.__oneNodeThrowaway=false; }
 // Given a source node id, poke every One Node connected to its output(s) to generate.
@@ -623,9 +624,9 @@ function _oneNodeChainForward(srcId){
   // POSE: FKP:posepreview (PreviewImage on the DWPose output) emits the skeleton
   // image. Stash its URL so the final result can offer a before(skeleton)/after.
   api.addEventListener("executed",(evt)=>{
-    if(_oneNodeThrowawayActive()) return; // ignore events from a One Node downstream-push graph run
-    if(!_activeS?.generating) return;
     const d=evt.detail||{};
+    if(_oneNodeThrowawayActive() && !_isOurRun(d.prompt_id)) return; // ignore a One Node downstream-push graph run
+    if(!_activeS?.generating) return;
     if(d.node!=="FKP:posepreview") return;
     const imgs=d.output?.images;
     if(!imgs||!imgs.length) return;
@@ -637,9 +638,9 @@ function _oneNodeChainForward(srcId){
   // Auto-save off: the current mode's save node is a PreviewImage (temp). Grab its
   // temp images here (a gallery scan won't see them — they're not in output).
   api.addEventListener("executed",(evt)=>{
-    if(_oneNodeThrowawayActive()) return; // ignore events from a One Node downstream-push graph run
-    if(!_activeS?.generating) return;
     const d=evt.detail||{};
+    if(_oneNodeThrowawayActive() && !_isOurRun(d.prompt_id)) return; // ignore a One Node downstream-push graph run
+    if(!_activeS?.generating) return;
     // Only react to OUR OWN run — executed is global and a chained downstream graph fires it too.
     const ourId=_activePromptIdRef?.();
     if(d.prompt_id && ourId && d.prompt_id!==ourId) return;
@@ -657,7 +658,7 @@ function _oneNodeChainForward(srcId){
 
   api.addEventListener("execution_success",async(evt)=>{
     // A One Node downstream-push graph run finished — clear it and stay quiet.
-    if(_oneNodeThrowawayActive()){ _oneNodeThrowawayEnd(); return; }
+    if(_oneNodeThrowawayActive() && !_isOurRun(evt?.detail?.prompt_id)){ _oneNodeThrowawayEnd(); return; }
     if(!_activeS?.generating){
       // Not our generation (e.g. the user pressing Run on the graph), OR the auto-save-off
       // temp path already finished (it sets generating=false in showTemp and triggers
@@ -711,8 +712,8 @@ function _oneNodeChainForward(srcId){
     // clear the shared flag — only execution_success does — leaving it stuck true until the
     // 10s safety timeout, which silences every One Node pack's handlers meanwhile. Clear it
     // here so a failed push doesn't create a ~10s dead window where generation shows nothing.
-    if(_oneNodeThrowawayActive()){ _oneNodeThrowawayForceClear(); return; }
     const errorPromptId=evt.detail?.prompt_id;
+    if(_oneNodeThrowawayActive() && !_isOurRun(errorPromptId)){ _oneNodeThrowawayForceClear(); return; }
     if(errorPromptId && _activePromptIdRef && errorPromptId!==_activePromptIdRef()) return;
     const msg=fmtErr(evt.detail?.exception_message||evt.detail?.error||evt.detail||"Execution failed.");
     _activeShowError?.(msg);
@@ -830,7 +831,6 @@ app.registerExtension({
     nodeType.prototype.onRemoved=function(){
       // Clean up registries so nothing calls into a deleted node. Pass our own api ref so a
       // newer instance that reused this id (workflow switch) is NOT wiped — see _oneNodeUnregister.
-      try{ delete _fkNodes[this.id]; }catch(e){}
       try{ _oneNodeUnregister(this.id, this._fkFamilyApiRef?.()); }catch(e){}
       // Only drop the UI cache if THIS instance still owns it. On a workflow switch the new
       // instance has already claimed the cache (cached.currentNode=newNode) before this old
@@ -898,7 +898,8 @@ app.registerExtension({
           bgRemovalModel: saved.bgRemovalModel||"",  // birefnet model for remove bg
           batchCount:   saved.batchCount||1,    // T2I: how many images to generate per click (1-4)
           autoSave:     saved.autoSave!==undefined?saved.autoSave:true, // T2I: auto-save results to gallery (default on)
-          autoSend:     saved.autoSend!==undefined?saved.autoSend:true, // send image output downstream automatically (default on)
+          inpFeather:   saved.inpFeather||0,    // inpaint seam feather (0 = auto)
+          inpaintRefName: saved.inpaintRefName||null, // optional reference image for reference-guided inpainting
           // Pose (RefControl): DWPose skeleton from pose image + reference -> result.
           poseImage:    saved.poseImage||null,   // pose: the pose to copy (DWPose skeleton)
           poseRef:      saved.poseRef||null,     // pose: appearance/content reference image
@@ -967,7 +968,7 @@ app.registerExtension({
           advancedUI:S.advancedUI, steps:S.steps, cfg:S.cfg, sampler:S.sampler, scheduler:S.scheduler, denoise:S.denoise,
           image1Name:S.image1Name, image2Name:S.image2Name,
           fsTarget:S.fsTarget, fsSource:S.fsSource, fsLora:S.fsLora, fsResizeLonger:S.fsResizeLonger, bgRemovalModel:S.bgRemovalModel,
-          batchCount:S.batchCount, autoSave:S.autoSave, autoSend:S.autoSend,
+          batchCount:S.batchCount, autoSave:S.autoSave, inpFeather:S.inpFeather, inpaintRefName:S.inpaintRefName,
           poseImage:S.poseImage, poseRef:S.poseRef, poseLora:S.poseLora,
           poseUseSizeSource:S.poseUseSizeSource, poseResizeLonger:S.poseResizeLonger,
           upscaleImage:S.upscaleImage, upscaleModel:S.upscaleModel, upscaleVae:S.upscaleVae,
@@ -9021,7 +9022,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         genBtn.style.border="2px solid transparent";
         stopBtn.style.maxWidth="0";stopBtn.style.minWidth="0";stopBtn.style.width="0";stopBtn.style.opacity="0";stopBtn.style.padding="0";stopBtn.style.marginLeft="0";
         progWrap.style.display="none";
-        if(_lastGenObj) previewDelBtn.style.display="flex";
+        if(_lastGenObj&&_lastGenObj.type!=="temp") previewDelBtn.style.display="flex"; // unsaved temp isn't in the gallery
         autoSaveTog.style.display="flex"; // restore after generating (all modes)
         _refreshQuickUp();
       };
@@ -9095,7 +9096,7 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         const body=obj
           ? {node_id:String(_liveId()),filename:obj.filename,subfolder:obj.subfolder||"",type:obj.type||"output"}
           : {node_id:String(_liveId()),filename:""};
-        _outPendingPush=fetch("/flux_klein/set_output",{
+        _outPendingPush=api.fetchApi("/flux_klein/set_output",{
           method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body),
         }).then(()=>true).catch(e=>{ console.warn("[FluxKlein] set_output:",fmtErr(e)); return false; });
         return _outPendingPush;
@@ -10764,8 +10765,9 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         if(lbSetOutBtn.disabled) return;
         const v=_lbActiveImg; if(!v) return;
         // Point the node output at this gallery image (type output — it lives in the gallery).
-        _lastGenObj={filename:v.filename,subfolder:v.subfolder||"",type:"output"};
-        _pushOutput(_lastGenObj);
+        // Only the downstream output changes — _lastGenObj stays on the shown preview image,
+        // so the preview's Delete / Use-as keep acting on what the user sees.
+        _pushOutput({filename:v.filename,subfolder:v.subfolder||"",type:"output"});
         // Brief confirmation, then restore the label.
         tx(_lbSetOutLbl,"✓ Output set");lbSetOutBtn.style.color=LIME;lbSetOutBtn.style.borderColor=LIME;
         setTimeout(()=>{ tx(_lbSetOutLbl,"Set as output");lbSetOutBtn.style.color=C.muted;lbSetOutBtn.style.borderColor=C.border; },1400);
@@ -12013,7 +12015,13 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
       // fresh. Guarded so a poke is ignored while already generating (no double runs).
       // Defined BEFORE the cache object below, which stores it for the cached-branch
       // re-registration on workflow switch (const → temporal dead zone if referenced earlier).
-      const _fkTriggerGenerate=()=>{ if(!S.generating) genBtn.click(); };
+      // shortcut: WS events route through the single global _active* slots, so a poke waits while
+      // ANOTHER node is generating (else it would steal that node's events and strand it).
+      const _fkTriggerGenerate=()=>{
+        if(S.generating) return;
+        if(_activeS&&_activeS!==S&&_activeS.generating){ setTimeout(_fkTriggerGenerate,500); return; }
+        genBtn.click();
+      };
 
       if(!window.__fluxklein_nodes) window.__fluxklein_nodes={};
       window.__fluxklein_nodes[this.id]={
@@ -12021,9 +12029,6 @@ width:"34px",background:C.bg2,border:`1px solid ${C.border}`,borderRadius:"4px",
         fns:{showFinal,showFinalBatch,showTemp,showPreview,resetBtn,setStage,showError,clearError,poseSkeleton,autoSend,getPromptId:()=>_activePromptId,triggerGenerate:_fkTriggerGenerate},
       };
       _curCacheKey=this.id;
-
-      // Track this node instance (cleaned up in onRemoved).
-      _fkNodes[this.id]={};
 
       // Register in the One Node family bus so an upstream One Node (e.g. Gemma) can
       // chain-trigger this node's generation.
